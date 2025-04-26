@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebXR Runner Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <style>
+    body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #overlay {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1;
+    }
+    #start-button {
+      padding: 12px 24px;
+      font-size: 18px;
+      background: rgba(72, 118, 255, 0.8);
+      color: white;
+      border: none;
+      border-radius: 30px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #start-button:hover {
+      background: rgba(72, 118, 255, 1);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+    }
+    #status {
+      margin-top: 15px;
+      font-size: 16px;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 10px 15px;
+      border-radius: 12px;
+      display: none;
+      backdrop-filter: blur(5px);
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+<div id="overlay">
+  <button id="start-button">Start Runner Game</button>
+  <div id="status"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
+import { ARButton } from 'https://unpkg.com/three@0.150.1/examples/jsm/webxr/ARButton.js';
+
+let camera, scene, renderer;
+let controller;
+let player;
+let obstacles = [];
+let collectibles = [];
+let score = 0;
+let gameOver = false;
+const lanes = [-0.3, 0, 0.3]; // Left, Center, Right
+
+init();
+
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+  scene.add(light);
+
+  document.getElementById('start-button').addEventListener('click', () => {
+    if (navigator.xr) {
+      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+        if (supported) {
+          navigator.xr.requestSession('immersive-ar', {
+            requiredFeatures: ['hit-test'],
+            optionalFeatures: ['dom-overlay'],
+            domOverlay: { root: document.body }
+          }).then(onSessionStarted);
+        } else {
+          updateStatus('WebXR AR session is not supported.');
+        }
+      });
+    } else {
+      updateStatus('WebXR is not supported.');
+    }
+  });
+
+  window.addEventListener('resize', onWindowResize);
+}
+
+function updateStatus(message) {
+  const statusElement = document.getElementById('status');
+  statusElement.style.display = 'block';
+  statusElement.textContent = message;
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onSessionStarted(session) {
+  renderer.xr.setReferenceSpaceType('local');
+  renderer.xr.setSession(session);
+
+  document.getElementById('start-button').style.display = 'none';
+  updateStatus('Running!');
+
+  setupPlayer();
+  setupController();
+
+  renderer.setAnimationLoop(render);
+
+  session.addEventListener('end', () => {
+    updateStatus('Game Over. Your Score: ' + score);
+    document.getElementById('start-button').style.display = 'block';
+    gameOver = true;
+  });
+}
+
+function setupPlayer() {
+  player = new THREE.Object3D();
+  player.position.set(0, 0, 0);
+  scene.add(player);
+}
+
+function setupController() {
+  controller = renderer.xr.getController(0);
+  scene.add(controller);
+}
+
+function spawnObstacleOrCollectible() {
+  const lane = lanes[Math.floor(Math.random() * lanes.length)];
+  const isCollectible = Math.random() > 0.7;
+
+  const geometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+  const material = new THREE.MeshStandardMaterial({ color: isCollectible ? 0x00ff00 : 0xff0000 });
+  const object = new THREE.Mesh(geometry, material);
+  object.position.set(lane, 0, -2);
+
+  if (isCollectible) {
+    collectibles.push(object);
+  } else {
+    obstacles.push(object);
+  }
+
+  scene.add(object);
+}
+
+function render(timestamp, frame) {
+  if (gameOver) return;
+
+  if (Math.random() < 0.02) { // Spawn randomly
+    spawnObstacleOrCollectible();
+  }
+
+  if (controller) {
+    const controllerPosition = new THREE.Vector3();
+    controller.getWorldPosition(controllerPosition);
+
+    // Find closest lane based on controller X position
+    let closestLane = lanes[0];
+    let minDistance = Math.abs(controllerPosition.x - lanes[0]);
+    for (let i = 1; i < lanes.length; i++) {
+      const dist = Math.abs(controllerPosition.x - lanes[i]);
+      if (dist < minDistance) {
+        minDistance = dist;
+        closestLane = lanes[i];
+      }
+    }
+    player.position.x = closestLane;
+  }
+
+  // Move obstacles and collectibles towards player
+  for (let obj of obstacles.concat(collectibles)) {
+    obj.position.z += 0.02;
+  }
+
+  // Check collisions
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    if (obstacles[i].position.distanceTo(player.position) < 0.1) {
+      updateStatus('Game Over! Final Score: ' + score);
+      renderer.xr.getSession().end();
+      return;
+    }
+    if (obstacles[i].position.z > 1) {
+      scene.remove(obstacles[i]);
+      obstacles.splice(i, 1);
+    }
+  }
+  
+  for (let i = collectibles.length - 1; i >= 0; i--) {
+    if (collectibles[i].position.distanceTo(player.position) < 0.1) {
+      score++;
+      updateStatus('Score: ' + score);
+      scene.remove(collectibles[i]);
+      collectibles.splice(i, 1);
+    }
+    if (collectibles[i].position.z > 1) {
+      scene.remove(collectibles[i]);
+      collectibles.splice(i, 1);
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+</script>
+</body>
+</html
