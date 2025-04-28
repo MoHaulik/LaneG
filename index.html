@@ -151,25 +151,39 @@
     }
 
     function onSessionStarted(session) {
+      // Set up XR session
       renderer.xr.setReferenceSpaceType('local');
       renderer.xr.setSession(session);
       
+      // Hide button and show status
       document.getElementById('start-button').style.display = 'none';
       document.getElementById('scoreDisplay').style.display = 'block';
       updateStatus('Looking for surface to place the game...');
 
+      // Set up controller
       setupController(session);
 
+      // Create the game area container
       gameArea = new THREE.Group();
       scene.add(gameArea);
+      
+      // Position the game area in front of the user
       gameArea.position.set(0, -0.5, -2);
-
+      
+      // Create game elements
       createRunway();
       createPlayer();
       
+      // Start animation loop
       renderer.setAnimationLoop(render);
+
+      // Handle session end
       session.addEventListener('end', onSessionEnd);
-      setTimeout(startGame, 2000);
+      
+      // Start the game after a brief delay
+      setTimeout(() => {
+        startGame();
+      }, 2000);
     }
 
     function onSessionEnd() {
@@ -180,150 +194,330 @@
     }
 
     function createRunway() {
+      // Create a runway for the game
       const runwayGeometry = new THREE.BoxGeometry(1.5, 0.02, 6);
-      const runwayMaterial = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.3, roughness: 0.7 });
+      const runwayMaterial = new THREE.MeshStandardMaterial({
+        color: 0x444444,
+        metalness: 0.3,
+        roughness: 0.7,
+      });
       gameRunway = new THREE.Mesh(runwayGeometry, runwayMaterial);
       gameRunway.receiveShadow = true;
       gameArea.add(gameRunway);
-
+      
+      // Add lane markers
       const laneWidth = 0.3;
       const laneMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
-
-      const leftLane = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 6), laneMaterial);
-      leftLane.position.set(lanes[0] - laneWidth / 2, 0.01, 0);
+      
+      // Left lane marker
+      const leftLaneGeometry = new THREE.BoxGeometry(0.05, 0.025, 6);
+      const leftLane = new THREE.Mesh(leftLaneGeometry, laneMaterial);
+      leftLane.position.x = lanes[0] - laneWidth/2;
+      leftLane.position.y = 0.01;
       gameArea.add(leftLane);
-
-      const rightLane = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 6), laneMaterial);
-      rightLane.position.set(lanes[2] + laneWidth / 2, 0.01, 0);
+      
+      // Right lane marker
+      const rightLaneGeometry = new THREE.BoxGeometry(0.05, 0.025, 6);
+      const rightLane = new THREE.Mesh(rightLaneGeometry, laneMaterial);
+      rightLane.position.x = lanes[2] + laneWidth/2;
+      rightLane.position.y = 0.01;
       gameArea.add(rightLane);
-
+      
+      // Center lane marker (dashed)
       for (let i = -2.9; i < 3; i += 0.4) {
-        const center1 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.2), laneMaterial);
-        center1.position.set(lanes[0] + laneWidth / 2, 0.01, i);
-        gameArea.add(center1);
-        const center2 = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.2), laneMaterial);
-        center2.position.set(lanes[2] - laneWidth / 2, 0.01, i);
-        gameArea.add(center2);
+        const centerLanePiece = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.025, 0.2),
+          laneMaterial
+        );
+        centerLanePiece.position.set(lanes[0] + laneWidth/2, 0.01, i);
+        gameArea.add(centerLanePiece);
+        
+        const centerLanePiece2 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.025, 0.2),
+          laneMaterial
+        );
+        centerLanePiece2.position.set(lanes[2] - laneWidth/2, 0.01, i);
+        gameArea.add(centerLanePiece2);
       }
     }
 
     function createPlayer() {
+      // Create player character
       const playerGeometry = new THREE.CapsuleGeometry(0.1, 0.2, 4, 8);
-      const playerMaterial = new THREE.MeshStandardMaterial({ color: 0x4876FF, metalness: 0.7, roughness: 0.3 });
+      const playerMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4876FF,
+        metalness: 0.7,
+        roughness: 0.3,
+      });
       player = new THREE.Mesh(playerGeometry, playerMaterial);
-      player.position.set(lanes[currentLane], 0.15, -2);
+      player.position.set(lanes[currentLane], 0.15, -2); // Position at the bottom of runway
       player.castShadow = true;
       player.receiveShadow = true;
       gameArea.add(player);
     }
 
     function setupController(session) {
+      // Create controller
       controller = renderer.xr.getController(0);
       controller.addEventListener('connected', (event) => {
         const xrInputSource = event.data;
-        updateStatus(`Controller connected: ${xrInputSource.handedness}. Tilt left/right to change lanes.`);
+        updateStatus(`Controller connected: ${xrInputSource.handedness}. Roll your hand to change lanes.`);
       });
-
-      const controllerMesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.01, 0.02, 0.1, 16),
-        new THREE.MeshStandardMaterial({ color: 0xFF4500, roughness: 0.3, metalness: 0.5 })
-      );
+      
+      // Add controller visuals
+      const controllerGeometry = new THREE.CylinderGeometry(0.01, 0.02, 0.1, 16);
+      const controllerMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFF4500,
+        roughness: 0.3,
+        metalness: 0.5
+      });
+      const controllerMesh = new THREE.Mesh(controllerGeometry, controllerMaterial);
       controllerMesh.rotation.x = Math.PI / 2;
       controller.add(controllerMesh);
-
+      
       scene.add(controller);
-      controller.userData = { movementCooldown: 0 };
+      
+      // Store controller orientation data for roll detection
+      controller.userData = { 
+        previousRotation: new THREE.Quaternion(),
+        previousRollAngle: 0,
+        movementCooldown: 0
+      };
     }
 
     function startGame() {
       isGameActive = true;
       score = 0;
       updateScore(0);
-      updateStatus('Game started! Tilt side to side to dodge obstacles and collect coins.');
-
-      obstacles.forEach(o => gameArea.remove(o));
-      collectibles.forEach(c => gameArea.remove(c));
+      updateStatus('Game started! Roll your hand to dodge obstacles and collect coins.');
+      
+      // Reset game elements
+      obstacles.forEach(obstacle => gameArea.remove(obstacle));
+      collectibles.forEach(collectible => gameArea.remove(collectible));
+      
       obstacles = [];
       collectibles = [];
+      
       clock.start();
     }
 
     function spawnObstacle() {
       if (!isGameActive) return;
+      
+      // Choose a random lane
       const randomLane = Math.floor(Math.random() * 3);
-      const obs = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.25, 0.25), new THREE.MeshStandardMaterial({ color: 0xFF0000, roughness: 0.4, metalness: 0.6 }));
-      obs.position.set(lanes[randomLane], 0.15, 3);
-      obs.castShadow = true;
-      gameArea.add(obs);
-      obstacles.push(obs);
-      setTimeout(spawnObstacle, (1.5 + Math.random()*1.5)*1000);
+      
+      // Create obstacle
+      const obstacleGeometry = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+      const obstacleMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFF0000,
+        roughness: 0.4,
+        metalness: 0.6
+      });
+      
+      const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+      obstacle.position.set(lanes[randomLane], 0.15, 3); // Start at the far end of runway
+      obstacle.castShadow = true;
+      obstacle.receiveShadow = true;
+      
+      // Add to scene and track
+      gameArea.add(obstacle);
+      obstacles.push(obstacle);
+      
+      // Schedule next obstacle
+      const timeToNext = 1.5 + Math.random() * 1.5; // 1.5 to 3 seconds apart
+      setTimeout(spawnObstacle, timeToNext * 1000);
     }
 
     function spawnCollectible() {
       if (!isGameActive) return;
+      
+      // Choose a random lane
       const randomLane = Math.floor(Math.random() * 3);
-      const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 16), new THREE.MeshStandardMaterial({ color: 0xFFD700, roughness: 0.2, metalness: 0.9, emissive: 0xFFD700, emissiveIntensity: 0.3 }));
-      coin.rotation.x = Math.PI/2;
-      coin.position.set(lanes[randomLane], 0.15, 3);
+      
+      // Create coin
+      const coinGeometry = new THREE.CylinderGeometry(0.07, 0.07, 0.02, 16);
+      const coinMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFD700,
+        roughness: 0.2,
+        metalness: 0.9,
+        emissive: 0xFFD700,
+        emissiveIntensity: 0.3
+      });
+      
+      const coin = new THREE.Mesh(coinGeometry, coinMaterial);
+      coin.rotation.x = Math.PI / 2; // Lay flat
+      coin.position.set(lanes[randomLane], 0.15, 3); // Start at the far end
       coin.castShadow = true;
+      
+      // Add to scene and track
       gameArea.add(coin);
       collectibles.push(coin);
-      setTimeout(spawnCollectible, (1 + Math.random()*2)*1000);
+      
+      // Schedule next collectible
+      const timeToNext = 1 + Math.random() * 2; // 1 to 3 seconds apart
+      setTimeout(spawnCollectible, timeToNext * 1000);
     }
 
     function updateGameElements(deltaTime) {
       const moveSpeed = gameSpeed * deltaTime;
-      for (let i = obstacles.length-1; i>=0; i--) {
-        const o = obstacles[i];
-        o.position.z -= moveSpeed;
-        if (o.position.z < -3) { gameArea.remove(o); obstacles.splice(i,1); continue;}        
-        o.rotation.x += 0.03; o.rotation.y += 0.03;
-        if (Math.abs(o.position.x-player.position.x)<0.2 && Math.abs(o.position.z-player.position.z)<0.3) {
-          gameArea.remove(o); obstacles.splice(i,1);
-          player.material.emissive.setRGB(1,0,0); player.material.emissiveIntensity=1;
-          setTimeout(()=>player.material.emissiveIntensity=0,300);
-          updateScore(-10); updateStatus('Ouch! -10 points');
+      
+      // Update obstacles
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const obstacle = obstacles[i];
+        obstacle.position.z -= moveSpeed;
+        
+        // Remove if it's past the player
+        if (obstacle.position.z < -3) {
+          gameArea.remove(obstacle);
+          obstacles.splice(i, 1);
+          continue;
+        }
+        
+        // Rotate for visual effect
+        obstacle.rotation.x += 0.03;
+        obstacle.rotation.y += 0.03;
+        
+        // Check collision with player
+        if (Math.abs(obstacle.position.x - player.position.x) < 0.2 && 
+            Math.abs(obstacle.position.z - player.position.z) < 0.3) {
+          // Collision with obstacle
+          gameArea.remove(obstacle);
+          obstacles.splice(i, 1);
+          
+          // Visual feedback and lose points
+          player.material.emissive.setRGB(1, 0, 0);
+          player.material.emissiveIntensity = 1;
+          setTimeout(() => {
+            player.material.emissiveIntensity = 0;
+          }, 300);
+          
+          updateScore(-10);
+          updateStatus('Ouch! -10 points');
         }
       }
-      for (let i=collectibles.length-1;i>=0;i--) {
-        const c=collectibles[i]; c.position.z-=moveSpeed;
-        if(c.position.z<-3){gameArea.remove(c); collectibles.splice(i,1); continue;}        
-        c.rotation.z += 0.05;
-        if (Math.abs(c.position.x-player.position.x)<0.2 && Math.abs(c.position.z-player.position.z)<0.3) {
-          gameArea.remove(c); collectibles.splice(i,1);
-          player.material.emissive.setRGB(0,1,0); player.material.emissiveIntensity=1;
-          setTimeout(()=>player.material.emissiveIntensity=0,300);
-          updateScore(5); updateStatus('Coin collected! +5 points');
+      
+      // Update collectibles
+      for (let i = collectibles.length - 1; i >= 0; i--) {
+        const collectible = collectibles[i];
+        collectible.position.z -= moveSpeed;
+        
+        // Remove if it's past the player
+        if (collectible.position.z < -3) {
+          gameArea.remove(collectible);
+          collectibles.splice(i, 1);
+          continue;
+        }
+        
+        // Rotate for visual effect
+        collectible.rotation.z += 0.05;
+        
+        // Check collision with player
+        if (Math.abs(collectible.position.x - player.position.x) < 0.2 && 
+            Math.abs(collectible.position.z - player.position.z) < 0.3) {
+          // Collect the coin
+          gameArea.remove(collectible);
+          collectibles.splice(i, 1);
+          
+          // Visual feedback and add points
+          player.material.emissive.setRGB(0, 1, 0);
+          player.material.emissiveIntensity = 1;
+          setTimeout(() => {
+            player.material.emissiveIntensity = 0;
+          }, 300);
+          
+          updateScore(5);
+          updateStatus('Coin collected! +5 points');
         }
       }
-      gameSpeed += deltaTime*0.01;
+      
+      // Speed up game slightly over time
+      gameSpeed += deltaTime * 0.01;
     }
 
-    function checkControllerMovement() {
-      if (!controller || !controller.userData) return;
-      const ud = controller.userData;
-      if (ud.movementCooldown>0) { ud.movementCooldown -= clock.getDelta(); return; }
-      const quat = new THREE.Quat      const quat = new THREE.Quat\uernion();
-      controller.getWorldQuaternion(quat);
-      const euler = new THREE.Euler().setFromQuaternion(quat,'YXZ');
-      const yaw = THREE.MathUtils.radToDeg(euler.y);
-      const TH = 15;
-      if (yaw < -TH && currentLane > 0) {
-        currentLane--; ud.movementCooldown=0.5; updateStatus(`Moving to lane ${currentLane+1}`);
-      } else if (yaw > TH && currentLane < lanes.length-1) {
-        currentLane++; ud.movementCooldown=0.5; updateStatus(`Moving to lane ${currentLane+1}`);
+    function checkControllerRoll(frame) {
+      if (!controller || !controller.userData || !frame) return;
+      
+      const userData = controller.userData;
+      
+      // Don't check movement during cooldown
+      if (userData.movementCooldown > 0) {
+        userData.movementCooldown -= clock.getDelta();
+        return;
+      }
+      
+      // Get the pose of the controller
+      const referenceSpace = renderer.xr.getReferenceSpace();
+      const pose = frame.getPose(controller.grip, referenceSpace);
+      
+      if (pose) {
+        // Get the controller's orientation
+        const orientation = pose.transform.orientation;
+        const quaternion = new THREE.Quaternion(
+          orientation.x,
+          orientation.y,
+          orientation.z,
+          orientation.w
+        );
+        
+        // Extract roll angle (rotation around z-axis in controller space)
+        // We'll use a simplified approach using Euler angles
+        const euler = new THREE.Euler().setFromQuaternion(quaternion, 'YXZ');
+        const rollAngle = euler.z; // Roll is rotation around z-axis
+        
+        // Map roll angle to lane
+        // Roll angle is in radians, typically between -PI and PI
+        // We'll map roughly as:
+        // Left lane: roll < -0.3 (roll left)
+        // Center lane: -0.3 <= roll <= 0.3
+        // Right lane: roll > 0.3 (roll right)
+        
+        let newLane = currentLane;
+        
+        if (rollAngle < -0.3) {
+          newLane = 0; // Left lane
+        } else if (rollAngle > 0.3) {
+          newLane = 2; // Right lane
+        } else {
+          newLane = 1; // Center lane
+        }
+        
+        // Only update if lane changed
+        if (newLane !== currentLane) {
+          currentLane = newLane;
+          userData.movementCooldown = 0.3; // Cooldown to prevent rapid switching
+          updateStatus(`Lane ${currentLane + 1}`);
+        }
+        
+        // Store current rotation for next frame
+        userData.previousRotation.copy(quaternion);
+        userData.previousRollAngle = rollAngle;
       }
     }
 
     function render(timestamp, frame) {
-      const dt = clock.getDelta();
+      const deltaTime = clock.getDelta();
+      
       if (isGameActive) {
-        checkControllerMovement();
-        const target = lanes[currentLane];
-        player.position.x += (target-player.position.x)*0.1;
-        updateGameElements(dt);
+        // Check controller roll for lane changes
+        if (frame) {
+          checkControllerRoll(frame);
+        }
+        
+        // Update player position (smooth lane transition)
+        const targetX = lanes[currentLane];
+        player.position.x += (targetX - player.position.x) * 0.1;
+        
+        // Update game elements
+        updateGameElements(deltaTime);
       }
-      if (isGameActive && obstacles.length===0 && collectibles.length===0) { spawnObstacle(); spawnCollectible(); }
+
+      // Start spawning obstacles and collectibles when game starts
+      if (isGameActive && obstacles.length === 0 && collectibles.length === 0) {
+        spawnObstacle();
+        spawnCollectible();
+      }
+      
       renderer.render(scene, camera);
     }
   </script>
